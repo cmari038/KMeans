@@ -77,9 +77,11 @@ int main(int argc, char* argv[]) {
     int seed = stoi(argv[6]);
     srand(seed);
 
+
+    vector<double> dataPoint;
     while(getline(inputFile, feature)) {
         stringstream data(feature);
-        vector<double> dataPoint;
+        dataPoint.clear();
         int coord;
         numFeatures++;
         while(data >> coord) {
