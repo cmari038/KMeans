@@ -12,13 +12,18 @@ __global__ void closestCentroid(float* centroids, float* point, int* labels, int
     float min = INFINITY;
     int minCluster = 0;
     int x = threadIdx.x + blockIdx.x * blockDim.x;
+    __shared__ float shared_centroids[clusters*dim];
+    __shared__ float shared_point[dim * numFeatures];
+    shared_centroids[x] = centroids[x];
+    shared_point[x] = point[x];
+    __syncthreads();
+
     if(x < numFeatures) {
         for(int i = 0; i < clusters; i++) {
             float distance = 0;
             for(int j = 0; j < dim; j++) {
-                distance += (centroids[i * dim + j] - point[x * dim + j]) * (centroids[i * dim + j] - point[x * dim + j]);
+                distance += sqrt((shared_centroids[i * dim + j] - shared_point[x * dim + j]) * (shared_centroids[i * dim + j] - shared_point[x * dim + j]));
             }
-            distance = sqrt(distance)
             if(distance < min) {
                     min = distance;
                     minCluster = i;
@@ -32,40 +37,36 @@ __global__ void updateCentroids(float* centroids, float* point, int* labels, flo
     
     int thread = threadIdx.x;
     int idx = threadIdx.x + blockIdx.x * blockDim.x;
+    __shared__ float shared_centroids[clusters*dim];
+    __shared__ float shared_point[dim * numFeatures];
+    __shared__ float shared_sums[clusters*dim];
+    __shared__ int shared_cluster_counts[clusters];
+    shared_centroids[idx] = centroids[idx];
+    shared_point[idx] = point[idx];
+    shared_sums[idx] = sums[idx];
+    shared_cluster_counts[idx] = cluster_counts[idx];
+    __syncthreads();
+
     if(idx < numFeatures) {
         int cluster = labels[idx];
-        atomicAdd(&cluster_counts[cluster], 1);
+        atomicAdd(&shared_cluster_counts[cluster], 1);
         for(int i = 0; i < dim; i++) {
-            atomicAdd(&sums[cluster * dim + i], point[idx * dim + i]);
+            atomicAdd(&shared_sums[cluster * k + i], &shared_point[idx * k + i]);
         }
-        //for(int i = 0; i < dim; i++) {
-        centroids[idx * dim + i] = sums[idx * dim + i] / cluster_counts[idx];
-        //}
+        for(int i = 0; i < dim; i++) {
+            centroids[idx * dim + i] = shared_sums[idx * dim + i] / shared_cluster_counts[idx];
+        }
     }
 }
 
-/*__global__ bool convergence(float* centroids, float* oldCentroids, int threshold, int dim, int clusters) {
+bool convergence(float* centroids, float* oldCentroids, int threshold, int dim, int clusters) {
     float distance = 0;
     int idx = threadIdx.x + blockIdx.x * blockDim.x;
     for(int i = 0; i < clusters; i++) {
         for(int j = 0; j < dim; j++) {
-            distance += sqrt((oldCentroids[i * dim + j] - centroids[i * dim + j]) * (oldCentroids[i * dim + j] - centroids[i * dim + j]));
+            distance += sqrt((oldCentroids[[i * dim + j]] - centroids[i * dim + j]) * (oldCentroids[[i * dim + j]] - centroids[i * dim + j]));
         }
     }
-
-    if(distance <= threshold) {return true;}
-
-    else{return false;};
-}*/
-
-bool convergence(float* centroids, float* oldCentroids, int threshold, int dim, int k) {
-    double distance = 0;
-    for(int i = 0; i < k; i++) {
-        for(int j = 0; j < dim; j++) {
-            distance += pow(oldCentroids.at(i).at(j) - centroids.at(i).at(j), 2);
-        }
-    }
-        distance = sqrt(distance);
 
     if(distance <= threshold) {return true;}
 
@@ -141,12 +142,12 @@ int main(int argc, char* argv[]) {
     int iter = 0;
     bool done = false;
     float* oldCentroids;
-    //cudaMalloc(&oldCentroids, k * dim * sizeof(float));
+    cudaMalloc(&oldCentroids, k * dim * sizeof(float));
 
 
     while(!done) {
         //oldCentroids = cuda_centroids;
-        cudaMemcpy(oldCentroids, cuda_centroids, k * dim * sizeof(float), cudaMemcpyDevicetoHost);
+        cudaMemcpy(oldCentroids, cuda_centroids, k * dim * sizeof(float), cudaMemcpyDevicetoDevice);
         iter++;
 
         closestCentroid<<< (numFeatures + 255)/ 256, 256 >>>(cuda_centroids, cuda_features, labels, dim, k, numFeatures);
@@ -155,9 +156,7 @@ int main(int argc, char* argv[]) {
         cudaMemset(sums, 0,  k * dim * sizeof(float));
 
         updateCentroids<<< (numFeatures + 255)/256, 256 >>>(cuda_centroids, cuda_features, labels, sums, cluster_counts, dim, k, numFeatures);
-
-        cudaMemcpy(host_centroids, cuda_centroids, k * dim * sizeof(float), cudaMemcpyDevicetoHost);
-        done = iter > m || convergence(host_centroids, oldCentroids, t, dim, k);
+        done = iter > m || convergence<<< (k * dim + 255)/256, 256 >>>(centroids, oldCentroids, t, dim, k);
     }
 
     cudaFree(cuda_features);

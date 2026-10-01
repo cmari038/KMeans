@@ -50,9 +50,9 @@ void updateCentroids(map<int, vector<vector<double>>> &labels,  vector<vector<do
         }
 }
 
-bool convergence(vector<vector<double>> &centroids, vector<vector<double>> &oldCentroids, int threshold, int dim) {
+bool convergence(vector<vector<double>> &centroids, vector<vector<double>> &oldCentroids, int threshold, int dim, int k) {
     double distance = 0;
-    for(int i = 0; i < centroids.size(); i++) {
+    for(int i = 0; i < k; i++) {
         for(int j = 0; j < dim; j++) {
             distance += pow(oldCentroids.at(i).at(j) - centroids.at(i).at(j), 2);
         }
@@ -67,7 +67,7 @@ bool convergence(vector<vector<double>> &centroids, vector<vector<double>> &oldC
 int main(int argc, char* argv[]) {
     string feature;
     istringstream data;
-    int numFeatures;
+    int numFeatures = 0;
     vector<vector<double>> features;
     ifstream inputFile(argv[3]);
     int k = stoi(argv[1]);
@@ -112,7 +112,7 @@ int main(int argc, char* argv[]) {
         }
 
         updateCentroids(labels, centroids, dim, k);
-        done = iter > m || convergence(centroids, oldCentroids, t, dim);
+        done = iter > m || convergence(centroids, oldCentroids, t, dim, k);
     }
     
 }
