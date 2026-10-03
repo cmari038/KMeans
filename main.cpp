@@ -27,7 +27,7 @@ int closestCentroid(vector<float> &point, vector<vector<float>> &centroids, int 
         for(int i = 0; i < dim; i++) {
             distance += pow(point.at(i) - centroids.at(j).at(i), 2);
         }
-        distance = sqrt(distance);
+        distance = sqrtf(distance);
         if(distance < min) {
             min = distance;
             minIndex = j;
@@ -59,15 +59,15 @@ bool convergence(vector<vector<float>> &centroids, vector<vector<float>> &oldCen
         for(int j = 0; j < dim; j++) {
             distance += pow(oldCentroids.at(i).at(j) - centroids.at(i).at(j), 2);
         }
-         distance = sqrt(distance);
+         distance = sqrtf(distance);
          if(distance <= threshold) {
             check++;
          }
     }
 
-    if(check == dim) {return true;}
+    if(check == k) {return true;}
 
-    else{return false;};
+    else{return false;}
 }
 
 int main(int argc, char* argv[]) {

@@ -18,19 +18,19 @@ __global__ void closestCentroid(float* centroids, float* point, int* labels, int
             for(int j = 0; j < dim; j++) {
                 distance += (centroids[i * dim + j] - point[x * dim + j]) * (centroids[i * dim + j] - point[x * dim + j]);
             }
-            distance = sqrt(distance)
+            distance = sqrtf(distance);
             if(distance < min) {
                     min = distance;
                     minCluster = i;
             }
         }
+        labels[x] = minCluster;
     }
-    labels[x] = minCluster;
 }
 
-__global__ void updateCentroids(float* centroids, float* point, int* labels, float* sums, int* cluster_counts, int dim, int clusters, int numFeatures) {
+__global__ void addCentroids(float* centroids, float* point, int* labels, float* sums, int* cluster_counts, int dim, int clusters, int numFeatures) {
     
-    int thread = threadIdx.x;
+    //int thread = threadIdx.x;
     int idx = threadIdx.x + blockIdx.x * blockDim.x;
     if(idx < numFeatures) {
         int cluster = labels[idx];
@@ -39,37 +39,33 @@ __global__ void updateCentroids(float* centroids, float* point, int* labels, flo
             atomicAdd(&sums[cluster * dim + i], point[idx * dim + i]);
         }
         //for(int i = 0; i < dim; i++) {
-        centroids[idx * dim + i] = sums[idx * dim + i] / cluster_counts[idx];
+        //centroids[idx * dim + i] = sums[idx * dim + i] / cluster_counts[idx];
         //}
     }
 }
 
-/*__global__ bool convergence(float* centroids, float* oldCentroids, int threshold, int dim, int clusters) {
-    float distance = 0;
+__global__ void updateCentroids(float* centroids, float* sums, int* cluster_counts, int dim, int clusters, int numFeatures) {
+    
+    int thread = threadIdx.x;
     int idx = threadIdx.x + blockIdx.x * blockDim.x;
-    for(int i = 0; i < clusters; i++) {
-        for(int j = 0; j < dim; j++) {
-            distance += sqrt((oldCentroids[i * dim + j] - centroids[i * dim + j]) * (oldCentroids[i * dim + j] - centroids[i * dim + j]));
-        }
+    if(idx < cluster * dim) {
+        //for(int i = 0; i < dim; i++) {
+        centroids[idx] = sums[idx] / cluster_counts[idx / dim;];
+        //}
     }
-
-    if(distance <= threshold) {return true;}
-
-    else{return false;};
-}*/
+}
 
 bool convergence(float* centroids, float* oldCentroids, int threshold, int dim, int k) {
-    double distance = 0;
-    for(int i = 0; i < k; i++) {
-        for(int j = 0; j < dim; j++) {
-            distance += pow(oldCentroids.at(i).at(j) - centroids.at(i).at(j), 2);
-        }
+    float distance = 0;
+    int check = 0;
+    for(int i = 0; i < k * dim; i++) {
+        distance += pow(oldCentroids[i] - centroids[i], 2);
     }
-        distance = sqrt(distance);
 
+    distance = sqrtf(distance);
     if(distance <= threshold) {return true;}
 
-    else{return false;};
+    else {return false;}
 }
 
 int main(int argc, char* argv[]) {
@@ -90,7 +86,7 @@ int main(int argc, char* argv[]) {
     while(getline(inputFile, feature)) {
         stringstream data(feature);
         dataPoint.clear();
-        int coord;
+        float coord;
         numFeatures++;
         while(data >> coord) {dataPoint.push_back(coord);}
         features.push_back(dataPoint);
@@ -128,8 +124,8 @@ int main(int argc, char* argv[]) {
     cudaMalloc(&cluster_counts, k*sizeof(int));
     cudaMalloc(&sums, k * dim * sizeof(float));
 
-    cudaMemcpy(cuda_features, host_features,  numFeatures*dim*sizeof(float), cudaMemcpyHosttoDevice);
-    cudaMemcpy(cuda_centroids, host_centroids,  k*dim*sizeof(float), cudaMemcpyHosttoDevice);
+    cudaMemcpy(cuda_features, host_features,  numFeatures*dim*sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(cuda_centroids, host_centroids,  k*dim*sizeof(float), cudaMemcpyHostToDevice);
     cudaMemset(sums, 0, k * dim * sizeof(float));
     cudaMemset(cluster_counts, 0,  k * sizeof(int));
 
@@ -140,13 +136,20 @@ int main(int argc, char* argv[]) {
 
     int iter = 0;
     bool done = false;
-    float* oldCentroids;
+    float* oldCentroids = (float*)malloc(k*dim*sizeof(float)); ;
     //cudaMalloc(&oldCentroids, k * dim * sizeof(float));
+
+
+    cudaEvent_t start, stop;
+    cudaEventCreate(&start);
+    cudaEventCreate(&stop)
+    float averageTime = 0;
 
 
     while(!done) {
         //oldCentroids = cuda_centroids;
-        cudaMemcpy(oldCentroids, cuda_centroids, k * dim * sizeof(float), cudaMemcpyDevicetoHost);
+        cudaEventRecord(start);
+        cudaMemcpy(oldCentroids, cuda_centroids, k * dim * sizeof(float), cudaMemcpyDeviceToHost);
         iter++;
 
         closestCentroid<<< (numFeatures + 255)/ 256, 256 >>>(cuda_centroids, cuda_features, labels, dim, k, numFeatures);
@@ -154,10 +157,32 @@ int main(int argc, char* argv[]) {
         cudaMemset(cluster_counts, 0,  k * sizeof(int));
         cudaMemset(sums, 0,  k * dim * sizeof(float));
 
-        updateCentroids<<< (numFeatures + 255)/256, 256 >>>(cuda_centroids, cuda_features, labels, sums, cluster_counts, dim, k, numFeatures);
+        addCentroids<<< (numFeatures + 255)/256, 256 >>>(cuda_centroids, cuda_features, labels, sums, cluster_counts, dim, k, numFeatures);
+        updateCentroids<<< (k * dim + 255)/256, 256 >>>(cuda_centroids, sums, cluster_counts, dim, k, numFeatures);
 
-        cudaMemcpy(host_centroids, cuda_centroids, k * dim * sizeof(float), cudaMemcpyDevicetoHost);
+
+        cudaMemcpy(host_centroids, cuda_centroids, k * dim * sizeof(float), cudaMemcpyDeviceToHost);
         done = iter > m || convergence(host_centroids, oldCentroids, t, dim, k);
+        cudaEventRecord(stop);
+        float milliseconds = 0;
+        cudaEventElapsedTime(&milliseconds, start, stop);
+        averageTime += milliseconds;
+    }
+
+    averageTime = averageTime / iter;
+    printf("%d,%lf\n", iter, averageTime);
+    
+    if(c) {
+        for (int clusterId = 0; clusterId < k; clusterId ++){
+            printf("%d ", clusterId);
+            for (int d = 0; d < dim; d++) {printf("%lf ", host_centroids[clusterId + d * k]);}
+            printf("\n");
+        }
+    }
+
+    else {
+        printf("clusters:");
+        for (int p=0; p < numFeatures; p++) {printf(" %d", labels[p]);}
     }
 
     cudaFree(cuda_features);
@@ -168,7 +193,9 @@ int main(int argc, char* argv[]) {
 
     free(host_features);
     free(host_centroids);
+    free(oldCentroids);
     //free(host_labels);
     //free(host_sums);
     //free(host_cluster_sizes);
+
 }

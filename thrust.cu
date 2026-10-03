@@ -20,7 +20,7 @@ int closestCentroid(device_vector<float> &point,  device_vector<float> &centroid
         thrust::copy(centroids.begin() + (i*dim), centroids.begin() + (i * dim) + dim, centroid);
         thrust::transform(point.begin(), point.end(), centroid.begin(), sums.begin(), [] __device__(float x, float y) {return (x-y)*(x-y)});
         distance = thrust::reduce(sums.begin(), sums.end(), 0.0f, thrust::plus<float>());
-        distance = sqrt(distance);
+        distance = sqrtf(distance);
         if(distance < min) {
             min = distance;
             minIndex = i;
@@ -54,14 +54,14 @@ bool convergence(host_vector<float> &centroids, host_vector<float> &oldCentroids
     for(int i = 0; i < clusters; i++) {
         //distance += pow(oldCentroids.at(i).at(j) - centroids.at(i).at(j), 2);
         thrust::transform(deviceCentroids.begin() + (i * dim), deviceCentroids.begin() + (i * dim) + dim, deviceOldCentroids.begin() +  (i * dim), sums.begin(), [] __device__(float x, float y) {(x-y)*(x-y)})
-        distance = sqrt(thrust::reduce(sums.begin(), sums.end()));
+        distance = sqrtf(thrust::reduce(sums.begin(), sums.end()));
         if(distance <= threshold) {check++;}
     }
     if(check == clusters) {
         return true;
     }
 
-    else{return false;};
+    else{return false;}
 }
 
 int main(int argc, char* argv[]) {
