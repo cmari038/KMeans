@@ -12,13 +12,14 @@ using namespace thrust;
 int closestCentroid(device_vector<float> &point,  device_vector<float> &centroids, int dim, int clusters) {
     float min = INFINITY;
     int minIndex = 0;
-    device_vector<float> sums;
-    device_vector<float> centroid;
+    device_vector<float> sums(dim);
+    device_vector<float> centroid(dim);
     float distance = 0;
     for(int i = 0; i < clusters; i++) {
         thrust::copy(centroids.begin() + (i*dim), centroids.begin() + (i * dim) + dim, centroid);
-        thrust::transform(point.begin(), point.end(), centroid.begin(), sums.begin(), [] __device__(float x, float y) {(x-y)*(x-y)})
-        distance = sqrt(thrust::reduce(sums.begin(), sums.end()));
+        thrust::transform(point.begin(), point.end(), centroid.begin(), sums.begin(), [] __device__(float x, float y) {return (x-y)*(x-y)});
+        distance = thrust::reduce(sums.begin(), sums.end(), 0.0f, thrust::plus<float>());
+        distance = sqrt(distance);
         if(distance < min) {
             min = distance;
             minIndex = i;
@@ -28,8 +29,8 @@ int closestCentroid(device_vector<float> &point,  device_vector<float> &centroid
     return minIndex;
 }
 
-void updateCentroids(map<int, device_vector<float>> &labels,  host_vector<float> &centroids,  int dim, int clusters) {
-    device_vector<float> sums;
+void updateCentroids(map<int, vector<device_vector<float>>> &labels,  host_vector<float> &centroids,  int dim, int clusters) {
+    device_vector<float> sums(dim);
     for(int i = 0; i < clusters; i++) {
             for(int j = 0; j < labels[i].size(); j++) {
                 if(j==0) {
@@ -37,21 +38,21 @@ void updateCentroids(map<int, device_vector<float>> &labels,  host_vector<float>
                 }
                 thrust::transform(labels[i].at(j).begin(), labels[i].at(j).end(), sums.begin(), sums.begin(), thrust::plus<float>());
             }
-            thrust:transform(sums.begin(), sums.end(), sums.begin(), [] __device__ (float x) {return x / labels[i].size()})
-            thrust::copy(sums.begin(), sums.end(), centroids.begin() + (i*dim))
+            thrust::transform(sums.begin(), sums.end(), sums.begin(), [] __device__ (float x) {return x / labels[i].size()});
+            thrust::copy(sums.begin(), sums.end(), centroids.begin() + (i*dim));
         }
 }
 
 bool convergence(host_vector<float> &centroids, host_vector<float> &oldCentroids, int threshold, int dim, int clusters) {
     device_vector<float> deviceCentroids = centroids;
     device_vector<float> deviceOldCentroids = oldCentroids;
-    device_vector<float> sums;
+    device_vector<float> sums(dim);
     float distance = 0;
     int check = 0;
 
     for(int i = 0; i < clusters; i++) {
         //distance += pow(oldCentroids.at(i).at(j) - centroids.at(i).at(j), 2);
-        thrust::transform(deviceCentroids.begin() + (i * dim), deviceCentroids.end() + (i * dim) + dim, deviceOldCentroids.begin(), sums.begin(), [] __device__(float x, float y) {(x-y)*(x-y)})
+        thrust::transform(deviceCentroids.begin() + (i * dim), deviceCentroids.begin() + (i * dim) + dim, deviceOldCentroids.begin() +  (i * dim), sums.begin(), [] __device__(float x, float y) {(x-y)*(x-y)})
         distance = sqrt(thrust::reduce(sums.begin(), sums.end()));
         if(distance <= threshold) {check++;}
     }
@@ -80,7 +81,7 @@ int main(int argc, char* argv[]) {
     while(getline(inputFile, feature)) {
         stringstream data(feature);
         dataPoint.clear();
-        int coord;
+        float coord;
         numFeatures++;
         while(data >> coord) {
             dataPoint.push_back(coord);
@@ -93,8 +94,8 @@ int main(int argc, char* argv[]) {
         centroids.push_back(features.at(rand() % numFeatures));
     }
 
-    host_vector<float> host_centroids;
-    host_vector<float> host_features;
+    host_vector<float> host_centroids(k*dim);
+    host_vector<float> host_features(numFeatures*dim);
 
     for(int i = 0; i < k; i++) {
         for(int j = 0; j < dim; j++) {
@@ -109,9 +110,9 @@ int main(int argc, char* argv[]) {
     }
 
     int iter = 0;
-    host_vector<float> oldCentroids;
+    host_vector<float> oldCentroids(k*dim);
     //host_vector<int> labels;
-    map<int, device_vector<float>> labels;
+    map<int, vector<device_vector<float>>> labels;
     bool done = false;
     device_vector<float> deviceFeatures;
     device_vector<float> deviceCentroids;
@@ -124,11 +125,11 @@ int main(int argc, char* argv[]) {
         deviceCentroids = host_centroids;
         for(int i = 0; i < numFeatures; i++) {
             deviceFeatures.clear();
-            copy(host_features.begin() + (i * dim), host_features.begin() + (i * dim) + dim, deviceFeatures.begin());
+            deviceFeatures.resize(dim);
+            thrust::copy(host_features.begin() + (i * dim), host_features.begin() + (i * dim) + dim, deviceFeatures.begin());
             //deviceCentroids = host_centroids;
             int nearestCentroid = closestCentroid(deviceFeatures, deviceCentroids, dim, k);
             //copy(deviceFeatures.begin(), deviceFeatures.end(), labels.begin() + i);
-            //labels.push_back(nearestCentroid);
             labels[nearestCentroid].push_back(deviceFeatures);
         }
 

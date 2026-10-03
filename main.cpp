@@ -87,7 +87,7 @@ int main(int argc, char* argv[]) {
     while(getline(inputFile, feature)) {
         stringstream data(feature);
         dataPoint.clear();
-        int coord;
+        float coord;
         numFeatures++;
         while(data >> coord) {
             dataPoint.push_back(coord);
