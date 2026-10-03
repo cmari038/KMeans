@@ -78,9 +78,11 @@ __global__ void updateCentroids(float* centroids, float* sums, int* cluster_coun
     
     //int thread = threadIdx.x;
     int idx = threadIdx.x + blockIdx.x * blockDim.x;
-    if(idx < cluster * dim) {
+    if(idx < clusters * dim) {
         //for(int i = 0; i < dim; i++) {
-        centroids[idx] = sums[idx] / cluster_counts[idx / dim;];
+        if(cluster_counts[idx/dim] > 0) {
+            centroids[idx] = sums[idx] / cluster_counts[idx / dim;];
+        }
         //}
     }
 }
@@ -174,17 +176,20 @@ int main(int argc, char* argv[]) {
     cudaEventCreate(&stop);
     float averageTime = 0;
 
+    size_t sharedAdd = k * dim * sizeof(float) + k * sizeof(int);
+    size_t sharedClosest = k * dim * sizeof(float);
+
     while(!done) {
         cudaEventRecord(start);
         cudaMemcpy(oldCentroids, cuda_centroids, k * dim * sizeof(float), cudaMemcpyDeviceToHost);
         iter++;
 
-        closestCentroid<<< (numFeatures + 255)/ 256, 256 >>>(cuda_centroids, cuda_features, labels, dim, k, numFeatures);
+        closestCentroid<<< (numFeatures + 255)/ 256, 256, sharedClosest >>>(cuda_centroids, cuda_features, labels, dim, k, numFeatures);
 
         cudaMemset(cluster_counts, 0,  k * sizeof(int));
         cudaMemset(sums, 0,  k * dim * sizeof(float));
 
-        addCentroids<<< (numFeatures + 255)/256, 256 >>>(cuda_centroids, cuda_features, labels, sums, cluster_counts, dim, k, numFeatures);
+        addCentroids<<< (numFeatures + 255)/256, 256, sharedAdd >>>(cuda_centroids, cuda_features, labels, sums, cluster_counts, dim, k, numFeatures);
         updateCentroids<<< (k * dim + 255)/256, 256 >>>(cuda_centroids, sums, cluster_counts, dim, k, numFeatures);
         cudaMemcpy(host_centroids, cuda_centroids, k * dim * sizeof(float), cudaMemcpyDeviceToHost);
         done = iter > m || convergence(host_centroids, oldCentroids, t, dim, k);
@@ -201,7 +206,7 @@ int main(int argc, char* argv[]) {
     if(c) {
         for (int clusterId = 0; clusterId < k; clusterId ++){
             printf("%d ", clusterId);
-            for (int d = 0; d < dim; d++) {printf("%lf ", host_centroids[clusterId + dim * k]);}
+            for (int d = 0; d < dim; d++) {printf("%lf ", host_centroids[clusterId * dim + k]);}
             printf("\n");
         }
     }
@@ -222,6 +227,7 @@ int main(int argc, char* argv[]) {
 
     free(host_features);
     free(host_centroids);
+    free(oldCentroids);
     //free(host_labels);
     //free(host_sums);
     //free(host_cluster_sizes);

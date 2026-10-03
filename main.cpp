@@ -40,22 +40,21 @@ int closestCentroid(vector<float> &point, vector<vector<float>> &centroids, int 
 void updateCentroids(map<int, vector<vector<float>>> &labels,  vector<vector<float>> &centroids, int dim, int clusters) {
     vector<float> oneD_point;
     for(int i = 0; i < clusters; i++) {
-            oneD_point.resize(labels[i].size(),0);
+            oneD_point.assign(dim, 0.0f);
             for(int j = 0; j < labels[i].size(); j++) {
                 //int length = clusters[centroids.at(i)].at(j).size();
                 for(int k = 0; k < dim; k++) {
-                    oneD_point[k] += labels[i].at(j).at(k) / dim;
+                    oneD_point[k] += labels[i].at(j).at(k) / labels[i].size();
                 }
             }
-            centroids.pop_back();
-            centroids.push_back(oneD_point);
+            centroids[i] = oneD_point;
         }
 }
 
-bool convergence(vector<vector<float>> &centroids, vector<vector<float>> &oldCentroids, int threshold, int dim, int k) {
-    float distance = 0;
+bool convergence(vector<vector<float>> &centroids, vector<vector<float>> &oldCentroids, float threshold, int dim, int k) {
     int check = 0;
     for(int i = 0; i < k; i++) {
+        float distance = 0;
         for(int j = 0; j < dim; j++) {
             distance += pow(oldCentroids.at(i).at(j) - centroids.at(i).at(j), 2);
         }
@@ -78,7 +77,7 @@ int main(int argc, char* argv[]) {
     ifstream inputFile(argv[3]);
     int k = stoi(argv[1]);
     int m = stoi(argv[4]);
-    int t = stoi(argv[5]);
+    float t = stoi(argv[5]);
     int dim = stoi(argv[2]);
     int seed = stoi(argv[7]);
     bool c = stoi(argv[6]);
@@ -119,6 +118,7 @@ int main(int argc, char* argv[]) {
         iter++;
         
         labels.clear();
+        centroidAssignments.clear();
         for(int i = 0; i < numFeatures; i++) {
             int nearestCentroid = closestCentroid(features.at(i), centroids, dim, k);
             centroidAssignments.push_back(nearestCentroid);
@@ -138,7 +138,7 @@ int main(int argc, char* argv[]) {
     if(c) {
         for (int clusterId = 0; clusterId < k; clusterId ++){
             printf("%d ", clusterId);
-            for (int d = 0; d < dim; d++) {printf("%lf ", centroids.at(clusterId));}
+            for (int d = 0; d < dim; d++) {printf("%lf ", centroids.at(clusterId).at(d));}
             printf("\n");
         }
     }
