@@ -12,50 +12,76 @@ __global__ void closestCentroid(float* centroids, float* point, int* labels, int
     float min = INFINITY;
     int minCluster = 0;
     int x = threadIdx.x + blockIdx.x * blockDim.x;
-    __shared__ float shared_centroids[clusters*dim];
-    __shared__ float shared_point[dim * numFeatures];
-    shared_centroids[x] = centroids[x];
-    shared_point[x] = point[x];
+    extern __shared__ float shared_centroids[];
+    //__shared__ float shared_point[idx * dim + dim];
+    for(int i = threadIdx.x; i < clusters * dim; i+= blockDim.x) {
+        shared_centroids[i] = centroids[i];
+    }
+    //shared_point[x] = point[x];
     __syncthreads();
 
     if(x < numFeatures) {
         for(int i = 0; i < clusters; i++) {
             float distance = 0;
             for(int j = 0; j < dim; j++) {
-                distance += sqrt((shared_centroids[i * dim + j] - shared_point[x * dim + j]) * (shared_centroids[i * dim + j] - shared_point[x * dim + j]));
+                distance += (shared_centroids[i * dim + j] - point[x * dim + j]) * (shared_centroids[i * dim + j] - point[x * dim + j]);
             }
+            distance = sqrtf(distance);
             if(distance < min) {
                     min = distance;
                     minCluster = i;
             }
         }
+        labels[x] = minCluster;
     }
-    labels[x] = minCluster;
 }
 
-__global__ void updateCentroids(float* centroids, float* point, int* labels, float* sums, int* cluster_counts, int dim, int clusters, int numFeatures) {
+__global__ void addCentroids(float* centroids, float* point, int* labels, float* sums, int* cluster_counts, int dim, int clusters, int numFeatures) {
     
     int thread = threadIdx.x;
     int idx = threadIdx.x + blockIdx.x * blockDim.x;
-    __shared__ float shared_centroids[clusters*dim];
-    __shared__ float shared_point[dim * numFeatures];
-    __shared__ float shared_sums[clusters*dim];
-    __shared__ int shared_cluster_counts[clusters];
-    shared_centroids[idx] = centroids[idx];
-    shared_point[idx] = point[idx];
-    shared_sums[idx] = sums[idx];
-    shared_cluster_counts[idx] = cluster_counts[idx];
+
+    //extern __shared__ float shared_centroids[];
+    extern __shared__ char sharedMem;
+    float* shared_sums = (float*)sharedMem;
+    int* shared_cluster_counts = (int*)shared_sums + clusters*dim; 
+
+    for(int i = thread; i < clusters * dim; i+= blockDim.x) {
+        //shared_centroids[i] = centroids[i];
+        shared_sums[i] = 0;
+    }
+    for(int i = thread; i < clusters; i += blockDim.x) {
+        shared_cluster_counts[i] = 0;
+    }
     __syncthreads();
 
     if(idx < numFeatures) {
         int cluster = labels[idx];
         atomicAdd(&shared_cluster_counts[cluster], 1);
         for(int i = 0; i < dim; i++) {
-            atomicAdd(&shared_sums[cluster * k + i], &shared_point[idx * k + i]);
+            atomicAdd(&shared_sums[cluster * dim + i], point[idx * dim + i]);
         }
-        for(int i = 0; i < dim; i++) {
-            centroids[idx * dim + i] = shared_sums[idx * dim + i] / shared_cluster_counts[idx];
-        }
+    }
+
+     __syncthreads();
+
+    for(int i = thread; i < clusters * dim; i+= blockDim.x) {
+        atomicAdd(&sums[i], shared_sums[i]);
+    }
+    for(int i = thread; i < clusters; i += blockDim.x) {
+        atomicAdd(&cluster_counts[i], shared_cluster_counts[i]);
+    }
+
+}
+
+__global__ void updateCentroids(float* centroids, float* sums, int* cluster_counts, int dim, int clusters, int numFeatures) {
+    
+    //int thread = threadIdx.x;
+    int idx = threadIdx.x + blockIdx.x * blockDim.x;
+    if(idx < cluster * dim) {
+        //for(int i = 0; i < dim; i++) {
+        centroids[idx] = sums[idx] / cluster_counts[idx / dim;];
+        //}
     }
 }
 
@@ -82,7 +108,8 @@ int main(int argc, char* argv[]) {
     int m = stoi(argv[4]);
     int t = stoi(argv[5]);
     int dim = stoi(argv[2]);
-    int seed = stoi(argv[6]);
+    int seed = stoi(argv[7]);
+    int c = stoi(argv[6]);
     srand(seed);
 
 
@@ -128,8 +155,8 @@ int main(int argc, char* argv[]) {
     cudaMalloc(&cluster_counts, k*sizeof(int));
     cudaMalloc(&sums, k * dim * sizeof(float));
 
-    cudaMemcpy(cuda_features, host_features,  numFeatures*dim*sizeof(float), cudaMemcpyHosttoDevice);
-    cudaMemcpy(cuda_centroids, host_centroids,  k*dim*sizeof(float), cudaMemcpyHosttoDevice);
+    cudaMemcpy(cuda_features, host_features,  numFeatures*dim*sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(cuda_centroids, host_centroids,  k*dim*sizeof(float), cudaMemcpyHostToDevice);
     cudaMemset(sums, 0, k * dim * sizeof(float));
     cudaMemset(cluster_counts, 0,  k * sizeof(int));
 
@@ -140,17 +167,16 @@ int main(int argc, char* argv[]) {
 
     int iter = 0;
     bool done = false;
-    float* oldCentroids;
-    cudaMalloc(&oldCentroids, k * dim * sizeof(float));
+    float* oldCentroids = (float*)malloc(k*dim*sizeof(float));
 
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
-    cudaEventCreate(&stop)
+    cudaEventCreate(&stop);
     float averageTime = 0;
 
     while(!done) {
         cudaEventRecord(start);
-        cudaMemcpy(oldCentroids, cuda_centroids, k * dim * sizeof(float), cudaMemcpyDevicetoDevice);
+        cudaMemcpy(oldCentroids, cuda_centroids, k * dim * sizeof(float), cudaMemcpyDeviceToHost);
         iter++;
 
         closestCentroid<<< (numFeatures + 255)/ 256, 256 >>>(cuda_centroids, cuda_features, labels, dim, k, numFeatures);
@@ -158,8 +184,11 @@ int main(int argc, char* argv[]) {
         cudaMemset(cluster_counts, 0,  k * sizeof(int));
         cudaMemset(sums, 0,  k * dim * sizeof(float));
 
-        updateCentroids<<< (numFeatures + 255)/256, 256 >>>(cuda_centroids, cuda_features, labels, sums, cluster_counts, dim, k, numFeatures);
-        done = iter > m || convergence<<< (k * dim + 255)/256, 256 >>>(centroids, oldCentroids, t, dim, k);
+        addCentroids<<< (numFeatures + 255)/256, 256 >>>(cuda_centroids, cuda_features, labels, sums, cluster_counts, dim, k, numFeatures);
+        updateCentroids<<< (k * dim + 255)/256, 256 >>>(cuda_centroids, sums, cluster_counts, dim, k, numFeatures);
+        cudaMemcpy(host_centroids, cuda_centroids, k * dim * sizeof(float), cudaMemcpyDeviceToHost);
+        done = iter > m || convergence(host_centroids, oldCentroids, t, dim, k);
+
         cudaEventRecord(stop);
         float milliseconds = 0;
         cudaEventElapsedTime(&milliseconds, start, stop);
@@ -172,14 +201,16 @@ int main(int argc, char* argv[]) {
     if(c) {
         for (int clusterId = 0; clusterId < k; clusterId ++){
             printf("%d ", clusterId);
-            for (int d = 0; d < dim; d++) {printf("%lf ", host_centroids[clusterId + d * k]);}
+            for (int d = 0; d < dim; d++) {printf("%lf ", host_centroids[clusterId + dim * k]);}
             printf("\n");
         }
     }
 
     else {
+        int* host_labels = (int*)malloc(numFeatures*sizeof(int));
+        cudaMemcpy(host_labels, labels, numFeatures * sizeof(int), cudaMemcpyDeviceToHost);
         printf("clusters:");
-        for (int p=0; p < numFeatures; p++) {printf(" %d", labels[p]);}
+        for (int p=0; p < numFeatures; p++) {printf(" %d", host_labels[p]);}
     }
 
 

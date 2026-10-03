@@ -136,13 +136,13 @@ int main(int argc, char* argv[]) {
 
     int iter = 0;
     bool done = false;
-    float* oldCentroids = (float*)malloc(k*dim*sizeof(float)); ;
+    float* oldCentroids = (float*)malloc(k*dim*sizeof(float));
     //cudaMalloc(&oldCentroids, k * dim * sizeof(float));
 
 
     cudaEvent_t start, stop;
     cudaEventCreate(&start);
-    cudaEventCreate(&stop)
+    cudaEventCreate(&stop);
     float averageTime = 0;
 
 
@@ -175,14 +175,16 @@ int main(int argc, char* argv[]) {
     if(c) {
         for (int clusterId = 0; clusterId < k; clusterId ++){
             printf("%d ", clusterId);
-            for (int d = 0; d < dim; d++) {printf("%lf ", host_centroids[clusterId + d * k]);}
+            for (int d = 0; d < dim; d++) {printf("%lf ", host_centroids[clusterId + dim * k]);}
             printf("\n");
         }
     }
 
     else {
+        int* host_labels = (int*)malloc(numFeatures*sizeof(int));
+        cudaMemcpy(host_labels, labels, numFeatures * sizeof(int), cudaMemcpyDeviceToHost);
         printf("clusters:");
-        for (int p=0; p < numFeatures; p++) {printf(" %d", labels[p]);}
+        for (int p=0; p < numFeatures; p++) {printf(" %d", host_labels[p]);}
     }
 
     cudaFree(cuda_features);
