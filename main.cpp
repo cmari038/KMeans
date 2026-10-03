@@ -7,6 +7,7 @@
 #include <map>
 #include <cmath>
 #include <input.h>
+#include <chrono>
 using namespace std;
 /*
 -k num_cluster: an integer specifying the number of clusters
@@ -79,7 +80,8 @@ int main(int argc, char* argv[]) {
     int m = stoi(argv[4]);
     int t = stoi(argv[5]);
     int dim = stoi(argv[2]);
-    int seed = stoi(argv[6]);
+    int seed = stoi(argv[7]);
+    bool c = stoi(argv[6]);
     srand(seed);
 
 
@@ -105,21 +107,46 @@ int main(int argc, char* argv[]) {
     int iter = 0;
     vector<vector<float>> oldCentroids;
     map<int, vector<vector<float>>> labels;
-    //vector<int> labels;
+    vector<int> centroidAssignments;
     bool done = false;
 
+    //auto start = chrono::high_resolution_clock::now();
+    chrono::milliseconds average{0};
+
     while(!done) {
+        auto start = chrono::high_resolution_clock::now();
         oldCentroids = centroids;
         iter++;
         
         labels.clear();
         for(int i = 0; i < numFeatures; i++) {
             int nearestCentroid = closestCentroid(features.at(i), centroids, dim, k);
+            centroidAssignments.push_back(nearestCentroid);
             labels[nearestCentroid].push_back(features.at(i));
         }
 
         updateCentroids(labels, centroids, dim, k);
         done = iter > m || convergence(centroids, oldCentroids, t, dim, k);
+        auto end = chrono::high_resolution_clock::now();
+        auto diff = chrono::duration_cast<chrono::milliseconds>(end - start);
+        average += diff;
     }
+
+    auto averageTime = average / iter;
+    printf("%d,%lf\n", iter, averageTime);
     
+    if(c) {
+        for (int clusterId = 0; clusterId < k; clusterId ++){
+            printf("%d ", clusterId);
+            for (int d = 0; d < dim; d++) {printf("%lf ", centroids.at(clusterId));}
+            printf("\n");
+        }
+    }
+
+    else {
+        printf("clusters:");
+        for (int p=0; p < numFeatures; p++) {printf(" %d", centroidAssignments.at(p));}
+    }
+
+
 }

@@ -7,6 +7,7 @@
 #include <sstream>
 #include <map>
 #include <cmath>
+#include <chrono>
 using namespace thrust;
 
 int closestCentroid(device_vector<float> &point,  device_vector<float> &centroids, int dim, int clusters) {
@@ -73,7 +74,8 @@ int main(int argc, char* argv[]) {
     int m = stoi(argv[4]);
     int t = stoi(argv[5]);
     int dim = stoi(argv[2]);
-    int seed = stoi(argv[6]);
+    int seed = stoi(argv[7]);
+    int c = stoi(argv[6]);
     srand(seed);
 
 
@@ -116,8 +118,11 @@ int main(int argc, char* argv[]) {
     bool done = false;
     device_vector<float> deviceFeatures;
     device_vector<float> deviceCentroids;
+    vector<int> centroidAssignments;
+    chrono::milliseconds average{0};
 
     while(!done) {
+        auto start = chrono::high_resolution_clock::now();
         oldCentroids = host_centroids;
         iter++;
         
@@ -131,10 +136,29 @@ int main(int argc, char* argv[]) {
             int nearestCentroid = closestCentroid(deviceFeatures, deviceCentroids, dim, k);
             //copy(deviceFeatures.begin(), deviceFeatures.end(), labels.begin() + i);
             labels[nearestCentroid].push_back(deviceFeatures);
+            centroidAssignments.push_back(nearestCentroid);
+            
+            auto end = chrono::high_resolution_clock::now();
+            auto diff = chrono::duration_cast<chrono::milliseconds>(end - start);
+            average += diff;
         }
 
         updateCentroids(labels, host_centroids, dim, k);
         done = iter > m || convergence(host_centroids, oldCentroids, t, dim, k);
     }
+
+    if(c) {
+        for (int clusterId = 0; clusterId < k; clusterId ++){
+            printf("%d ", clusterId);
+            for (int d = 0; d < dim; d++) {printf("%lf ", host_centroids.at(clusterId + d * k));}
+            printf("\n");
+        }
+    }
+
+    else {
+        printf("clusters:");
+        for (int p=0; p < numFeatures; p++) {printf(" %d", centroidAssignments.at(p));}
+    }
+
     
 }
